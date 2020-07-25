@@ -69,10 +69,142 @@ contract(
     });
 
     it("the recipient should be able to withdraw from the channel", async () => {
-      // code that will sign for recipient to withdraw
-      // code that will use this sign as well as recipient as caller of `withdraw` function
-      // the recipient should be able to close the channel
-      // make necessary assertions to validate balance of sender and recipient
+      
+      contractInstance = new web3.eth.Contract(LongLivedPaymentChannel.abi);
+
+      const gas = await contractInstance
+        .deploy({
+          data: LongLivedPaymentChannel.bytecode,
+          from: sender,
+          value: depositAmount,
+          arguments: [recipient, closeDuration],
+        })
+        .estimateGas();
+
+      const longLivedPaymentChannelTx = await contractInstance
+        .deploy({
+          data: LongLivedPaymentChannel.bytecode,
+          arguments: [recipient, closeDuration],
+        })
+        .send({
+          from: sender,
+          gas,
+          value: depositAmount,
+        });
+      contractAddress = longLivedPaymentChannelTx.options.address;
+
+      const amount = web3.utils.toWei("1", "ether");
+      const msg = web3.utils.soliditySha3(
+        { t: "address", v: contractAddress },
+        { t: "uint256", v: amount }
+      );
+
+      const sig = await web3.eth.accounts.sign(msg, senderSkey);
+      const finalSgn = sig.signature;
+
+      const recOldBalance = await web3.eth.getBalance(recipient);
+
+      const withdrawTx = await longLivedPaymentChannelTx.methods
+        .withdraw(amount, finalSgn)
+        .send({ from: recipient });
+
+      const recBalanceAfter = await web3.eth.getBalance(recipient);
+
+      const tx = await web3.eth.getTransaction(withdrawTx.transactionHash);
+
+      const transactionFee = web3.utils
+        .toBN(tx.gasPrice)
+        .mul(web3.utils.toBN(withdrawTx.gasUsed));
+
+      const actualRecBalance = web3.utils
+        .toBN(recOldBalance)
+        .add(web3.utils.toBN(amount))
+        .sub(web3.utils.toBN(transactionFee));
+
+      assert.equal(
+        actualRecBalance,
+        recBalanceAfter,
+        `Recipient Balance Should be ${actualRecBalance} but is ${recBalanceAfter}`
+      );
+    });
+
+    it("closing payment channel", async () => {
+      await web3.eth.sendTransaction({
+        from: masterAccount,
+        to: sender,
+        value: web3.utils.toWei("5", "ether"),
+        gas: 21000,
+      });
+      contractInstance = new web3.eth.Contract(LongLivedPaymentChannel.abi);
+
+      const gas = await contractInstance
+        .deploy({
+          data: LongLivedPaymentChannel.bytecode,
+          from: sender,
+          value: depositAmount,
+          arguments: [recipient, closeDuration],
+        })
+        .estimateGas();
+
+      const longLivedPaymentChannelTx = await contractInstance
+        .deploy({
+          data: LongLivedPaymentChannel.bytecode,
+          arguments: [recipient, closeDuration],
+        })
+        .send({
+          from: sender,
+          gas,
+          value: depositAmount,
+        });
+      contractAddress = longLivedPaymentChannelTx.options.address;
+
+      const senderBalanceAfterDep = await web3.eth.getBalance(sender);
+
+      const amount = web3.utils.toWei("1", "ether");
+      const msg = web3.utils.soliditySha3(
+        { t: "address", v: contractAddress },
+        { t: "uint256", v: amount }
+      );
+
+      const sig = await web3.eth.accounts.sign(msg, senderSkey);
+      const finalSign = sig.signature;
+
+      const recOldBalance = await web3.eth.getBalance(recipient);
+
+      const closeTx = await longLivedPaymentChannelTx.methods
+        .close(amount, finalSign)
+        .send({ from: recipient });
+
+      const recNewBalance = await web3.eth.getBalance(recipient);
+      const senderBalanceAfterClose = await web3.eth.getBalance(sender);
+
+      //extracting the Txfee
+      const tx = await web3.eth.getTransaction(closeTx.transactionHash);
+
+      const transactionFee = web3.utils
+        .toBN(tx.gasPrice)
+        .mul(web3.utils.toBN(closeTx.gasUsed));
+
+      const actualRecBalance = web3.utils
+        .toBN(recOldBalance)
+        .add(web3.utils.toBN(amount))
+        .sub(web3.utils.toBN(transactionFee));
+
+      assert.equal(
+        actualRecBalance,
+        recNewBalance,
+        `Recipient balance shoud be ${actualRecBalance}, but is ${recNewBalance}`
+      );
+
+      const actualSenderBalance = web3.utils
+        .toBN(senderBalanceAfterDep)
+        .add(web3.utils.toBN(web3.utils.toWei("1", "ether")));
+
+      assert.equal(
+        actualSenderBalance,
+        senderBalanceAfterClose,
+        `Sender balance shoud be ${actualSenderBalance}, but is ${senderBalanceAfterClose}`
+      );
     });
   }
 );
